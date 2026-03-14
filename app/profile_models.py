@@ -43,6 +43,7 @@ class Preset:
     notes: str = ""
     updated_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
     bindings: dict[str, Binding] = field(default_factory=dict)
+    runtime_overrides: dict[str, float | int] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, data: dict) -> "Preset":
@@ -57,6 +58,7 @@ class Preset:
             notes=data.get("notes", ""),
             updated_at=data.get("updated_at", datetime.now(UTC).isoformat()),
             bindings=bindings,
+            runtime_overrides=dict(data.get("runtime_overrides", {})),
         )
 
     def to_dict(self) -> dict:
@@ -70,4 +72,5 @@ class Preset:
                 action_name: binding.to_dict()
                 for action_name, binding in sorted(self.bindings.items())
             },
+            "runtime_overrides": dict(sorted(self.runtime_overrides.items())),
         }

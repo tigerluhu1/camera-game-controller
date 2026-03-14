@@ -11,3 +11,7 @@ class AppConfig:
     @property
     def profiles_dir(self) -> Path:
         return self.base_dir / "profiles"
+
+    @property
+    def settings_dir(self) -> Path:
+        return self.base_dir / "settings"

@@ -15,6 +15,7 @@ from app.editor_state import EditorState
 from app.input_mapper import DirectInputSender, InputMapper
 from app.preview import render_preview_frame
 from app.profile_store import ProfileStore
+from app.runtime_settings import RuntimeSettingsStore, resolve_runtime_settings
 from app.ui import SUPPORTED_ACTIONS
 from app.vision_backend import MediaPipeVisionBackend
 
@@ -51,6 +52,7 @@ class ProfileEditorApp:
     def __init__(self, config: AppConfig):
         self.config = config
         self.store = ProfileStore(config.profiles_dir)
+        self.runtime_store = RuntimeSettingsStore(config.settings_dir)
         self.state = EditorState()
         self.last_frame = None
         self.last_events: list[tuple[str, object, str]] = []
@@ -63,6 +65,8 @@ class ProfileEditorApp:
         self.vision_backend = MediaPipeVisionBackend()
         self.input_mapper = InputMapper(sender=self._dispatch_output_event)
         self.controller = Controller(detector=self._detect_frame, mapper=self._apply_actions)
+        self.runtime_defaults = self.runtime_store.load()
+        self.current_runtime_overrides: dict[str, float | int] = {}
         self._headless = False
         try:
             self.root = tk.Tk()
@@ -83,6 +87,7 @@ class ProfileEditorApp:
             self.actions_var = SimpleVar("")
             self.event_log_var = SimpleVar("")
             self.fps_var = SimpleVar("FPS: --")
+            self.runtime_source_var = SimpleVar("Global")
             self.mouse_sensitivity_var = SimpleVar(1.0)
             self.mouse_deadzone_var = SimpleVar(0)
             self.mouse_smoothing_var = SimpleVar(0.0)
@@ -95,6 +100,7 @@ class ProfileEditorApp:
                     "trigger_mode": SimpleVar("tap"),
                     "cooldown_ms": SimpleVar("0"),
                 }
+            self._load_runtime_into_vars(self.runtime_defaults, source_label="Global")
             return
 
         toolbar = ttk.Frame(self.root, padding=12)
@@ -131,6 +137,8 @@ class ProfileEditorApp:
         ttk.Label(self.root, textvariable=self.event_log_var, padding=(12, 0)).pack(fill="x")
         self.fps_var = tk.StringVar(value="FPS: --")
         ttk.Label(self.root, textvariable=self.fps_var, padding=(12, 0)).pack(fill="x")
+        self.runtime_source_var = tk.StringVar(value="Global")
+        ttk.Label(self.root, textvariable=self.runtime_source_var, padding=(12, 0)).pack(fill="x")
 
         content = ttk.Frame(self.root, padding=12)
         content.pack(fill="both", expand=True)
@@ -181,8 +189,31 @@ class ProfileEditorApp:
         ttk.Spinbox(preview_panel, from_=0, to=100, textvariable=self.mouse_deadzone_var, width=8).pack(anchor="w")
         ttk.Label(preview_panel, text="Mouse Smoothing").pack(anchor="w", pady=(8, 0))
         ttk.Scale(preview_panel, from_=0.0, to=0.95, variable=self.mouse_smoothing_var, orient="horizontal").pack(anchor="w", fill="x")
+        ttk.Button(preview_panel, text="Save Runtime Defaults", command=self.save_runtime_defaults).pack(anchor="w", pady=(8, 0), fill="x")
+        ttk.Button(preview_panel, text="Save Runtime To Preset", command=self.save_runtime_to_preset).pack(anchor="w", pady=(4, 0), fill="x")
+        ttk.Button(preview_panel, text="Reset To Defaults", command=self.reset_runtime_to_defaults).pack(anchor="w", pady=(4, 0), fill="x")
         self.preview_label = ttk.Label(preview_panel, text="No preview", width=40)
         self.preview_label.pack(anchor="w", pady=(8, 0))
+        self._load_runtime_into_vars(self.runtime_defaults, source_label="Global")
+
+    def _current_runtime_values(self) -> dict[str, float | int]:
+        return {
+            "mouse_sensitivity": float(self.mouse_sensitivity_var.get()),
+            "mouse_deadzone": int(self.mouse_deadzone_var.get()),
+            "mouse_smoothing": float(self.mouse_smoothing_var.get()),
+            "camera_device": int(self.camera_device_var.get()),
+        }
+
+    def _load_runtime_into_vars(self, values: dict[str, float | int], source_label: str) -> None:
+        self.mouse_sensitivity_var.set(float(values["mouse_sensitivity"]))
+        self.mouse_deadzone_var.set(int(values["mouse_deadzone"]))
+        self.mouse_smoothing_var.set(float(values["mouse_smoothing"]))
+        self.camera_device_var.set(int(values["camera_device"]))
+        self.runtime_source_var.set(source_label)
+        self.apply_runtime_settings()
+
+    def _resolved_runtime_settings(self, preset_overrides: dict[str, float | int] | None = None) -> dict[str, float | int]:
+        return resolve_runtime_settings(self.runtime_defaults, preset_overrides or self.current_runtime_overrides)
 
     def load_preset(self) -> None:
         game_name = self.game_var.get().strip()
@@ -204,6 +235,9 @@ class ProfileEditorApp:
             row["input_value"].set(binding.input_value if binding else "")
             row["trigger_mode"].set(binding.trigger_mode if binding else "tap")
             row["cooldown_ms"].set(str(binding.cooldown_ms if binding else 0))
+        self.current_runtime_overrides = dict(preset.runtime_overrides)
+        source_label = "Preset Override" if self.current_runtime_overrides else "Global"
+        self._load_runtime_into_vars(self._resolved_runtime_settings(preset.runtime_overrides), source_label=source_label)
         self.status_var.set(f"Loaded {preset_name}.")
 
     def _clear_rows(self) -> None:
@@ -318,7 +352,44 @@ class ProfileEditorApp:
             character_name=character_name,
             preset_name=resolved_preset_name,
             bindings=bindings,
+            runtime_overrides=dict(self.current_runtime_overrides),
         )
+
+    def save_runtime_defaults(self) -> None:
+        self.runtime_defaults = self._current_runtime_values()
+        self.runtime_store.save(self.runtime_defaults)
+        if not self.current_runtime_overrides:
+            self._load_runtime_into_vars(self.runtime_defaults, source_label="Global")
+        else:
+            self.runtime_source_var.set("Preset Override")
+            self.apply_runtime_settings()
+        self.status_var.set("Saved runtime defaults.")
+
+    def save_runtime_to_preset(self) -> None:
+        if not self.game_var.get().strip() or not self.preset_var.get().strip():
+            self.status_var.set("Game and preset are required.")
+            return
+        current = self._current_runtime_values()
+        overrides = {
+            key: value
+            for key, value in current.items()
+            if self.runtime_defaults.get(key) != value
+        }
+        self.current_runtime_overrides = overrides
+        self.runtime_source_var.set("Preset Override" if overrides else "Global")
+        self.apply_runtime_settings()
+        self.status_var.set("Runtime settings attached to preset.")
+
+    def reset_runtime_to_defaults(self) -> None:
+        self.current_runtime_overrides = {}
+        game_name = self.game_var.get().strip()
+        preset_name = self.preset_var.get().strip()
+        if game_name and preset_name:
+            preset = self._build_preset_from_rows()
+            preset.runtime_overrides = {}
+            self.store.save_preset(preset)
+        self._load_runtime_into_vars(self.runtime_defaults, source_label="Global")
+        self.status_var.set("Runtime settings reset to defaults.")
 
     def save_preset(self) -> None:
         game_name = self.game_var.get().strip()
@@ -335,6 +406,8 @@ class ProfileEditorApp:
     def new_preset(self, preset_name: str) -> None:
         self.preset_var.set(preset_name)
         self._clear_rows()
+        self.current_runtime_overrides = {}
+        self._load_runtime_into_vars(self.runtime_defaults, source_label="Global")
         self.state.load_preset(
             self.game_var.get().strip(),
             self.character_var.get().strip() or "default",
@@ -378,6 +451,8 @@ class ProfileEditorApp:
         self.store.delete_preset(game_name, character_name, preset_name)
         self.preset_var.set("")
         self._clear_rows()
+        self.current_runtime_overrides = {}
+        self._load_runtime_into_vars(self.runtime_defaults, source_label="Global")
         self.state.load_preset(game_name, character_name, "", {})
         self.status_var.set(f"Deleted {preset_name}.")
 

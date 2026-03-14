@@ -124,3 +124,58 @@ def test_event_log_and_fps_status_update(tmp_path):
     assert "key:1:tap" in app.event_log_var.get()
     assert "27.5" in app.fps_var.get()
     app.root.destroy()
+
+
+def test_runtime_defaults_and_overrides_round_trip_through_ui(tmp_path):
+    app = create_app(AppConfig(base_dir=tmp_path))
+    app.game_var.set("wow")
+    app.character_var.set("mage")
+    app.preset_var.set("pve")
+
+    app.mouse_sensitivity_var.set(1.9)
+    app.mouse_deadzone_var.set(11)
+    app.mouse_smoothing_var.set(0.45)
+    app.camera_device_var.set(2)
+    app.save_runtime_defaults()
+
+    app.mouse_sensitivity_var.set(2.7)
+    app.camera_device_var.set(4)
+    app.save_runtime_to_preset()
+    app.save_preset()
+
+    app.mouse_sensitivity_var.set(0.5)
+    app.mouse_deadzone_var.set(1)
+    app.mouse_smoothing_var.set(0.1)
+    app.camera_device_var.set(0)
+    app.load_preset()
+
+    assert app.mouse_sensitivity_var.get() == 2.7
+    assert app.mouse_deadzone_var.get() == 11
+    assert app.mouse_smoothing_var.get() == 0.45
+    assert app.camera_device_var.get() == 4
+    assert app.runtime_source_var.get() == "Preset Override"
+    app.root.destroy()
+
+
+def test_reset_runtime_to_defaults_clears_preset_override(tmp_path):
+    app = create_app(AppConfig(base_dir=tmp_path))
+    app.game_var.set("wow")
+    app.character_var.set("mage")
+    app.preset_var.set("pve")
+    app.mouse_sensitivity_var.set(1.5)
+    app.mouse_deadzone_var.set(8)
+    app.mouse_smoothing_var.set(0.3)
+    app.camera_device_var.set(1)
+    app.save_runtime_defaults()
+
+    app.mouse_sensitivity_var.set(2.5)
+    app.save_runtime_to_preset()
+    app.save_preset()
+
+    app.reset_runtime_to_defaults()
+
+    assert app.mouse_sensitivity_var.get() == 1.5
+    assert app.runtime_source_var.get() == "Global"
+    loaded = app.store.load_preset("wow", "mage", "pve")
+    assert loaded.runtime_overrides == {}
+    app.root.destroy()

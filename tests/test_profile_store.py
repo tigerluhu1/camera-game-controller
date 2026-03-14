@@ -34,3 +34,18 @@ def test_copy_and_rename_and_delete_preset(tmp_path: Path):
     assert copied_path == tmp_path / "wow" / "mage" / "raid.json"
     assert renamed_path == tmp_path / "wow" / "mage" / "mythic.json"
     assert not renamed_path.exists()
+
+
+def test_store_saves_and_loads_runtime_overrides(tmp_path: Path):
+    store = ProfileStore(tmp_path)
+    preset = Preset(
+        game_name="wow",
+        character_name="mage",
+        preset_name="pve",
+        runtime_overrides={"mouse_sensitivity": 2.2, "camera_device": 1},
+    )
+
+    store.save_preset(preset)
+    loaded = store.load_preset("wow", "mage", "pve")
+
+    assert loaded.runtime_overrides == {"mouse_sensitivity": 2.2, "camera_device": 1}
