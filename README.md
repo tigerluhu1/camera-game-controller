@@ -7,7 +7,7 @@ A Python desktop prototype for managing camera-driven game control presets.
 - Save presets under `profiles/<game>/<character>/<preset>.json`
 - Load presets by game, character, and preset name
 - Edit supported actions in a desktop form
-- Copy, rename, and delete presets through the storage layer
+- Create, copy, rename, and delete presets from the desktop toolbar
 - Track unsaved changes in editor state
 
 ## Supported Actions
@@ -28,6 +28,13 @@ A Python desktop prototype for managing camera-driven game control presets.
 ```bash
 python -m app.main
 ```
+
+Use the top toolbar to enter `Game`, `Character`, and `Preset`, then:
+- `New` clears the form for a new preset name
+- `Copy` saves the current form as a different preset
+- `Rename` renames the current preset file
+- `Delete` removes the current preset after confirmation
+- `Load` and `Save` read and write the selected preset
 
 ## Test
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import tkinter as tk
 from tkinter import ttk
+from tkinter import messagebox, simpledialog
 
 from app.config import AppConfig
 from app.editor_state import EditorState
@@ -35,6 +36,10 @@ class ProfileEditorApp:
             ttk.Label(toolbar, text=label).pack(side="left", padx=(0, 6))
             ttk.Entry(toolbar, textvariable=variable, width=18).pack(side="left", padx=(0, 12))
 
+        ttk.Button(toolbar, text="New", command=self.prompt_new_preset).pack(side="left", padx=(0, 6))
+        ttk.Button(toolbar, text="Copy", command=self.prompt_copy_preset).pack(side="left", padx=(0, 6))
+        ttk.Button(toolbar, text="Rename", command=self.prompt_rename_preset).pack(side="left", padx=(0, 6))
+        ttk.Button(toolbar, text="Delete", command=self.prompt_delete_preset).pack(side="left", padx=(0, 12))
         ttk.Button(toolbar, text="Load", command=self.load_preset).pack(side="left", padx=(0, 6))
         ttk.Button(toolbar, text="Save", command=self.save_preset).pack(side="left")
 
@@ -94,16 +99,19 @@ class ProfileEditorApp:
             row["cooldown_ms"].set(str(binding.cooldown_ms if binding else 0))
         self.status_var.set(f"Loaded {preset_name}.")
 
-    def save_preset(self) -> None:
+    def _clear_rows(self) -> None:
+        for row in self.row_vars.values():
+            row["enabled"].set(True)
+            row["input_value"].set("")
+            row["trigger_mode"].set("tap")
+            row["cooldown_ms"].set("0")
+
+    def _build_preset_from_rows(self, preset_name: str | None = None):
         from app.profile_models import Binding, Preset
 
         game_name = self.game_var.get().strip()
         character_name = self.character_var.get().strip() or "default"
-        preset_name = self.preset_var.get().strip()
-        if not game_name or not preset_name:
-            self.status_var.set("Game and preset are required.")
-            return
-
+        resolved_preset_name = (preset_name or self.preset_var.get()).strip()
         bindings = {}
         for action_name, row in self.row_vars.items():
             bindings[action_name] = Binding(
@@ -113,16 +121,91 @@ class ProfileEditorApp:
                 cooldown_ms=int(row["cooldown_ms"].get().strip() or "0"),
                 enabled=bool(row["enabled"].get()),
             )
-
-        preset = Preset(
+        return Preset(
             game_name=game_name,
             character_name=character_name,
-            preset_name=preset_name,
+            preset_name=resolved_preset_name,
             bindings=bindings,
         )
+
+    def save_preset(self) -> None:
+        game_name = self.game_var.get().strip()
+        preset_name = self.preset_var.get().strip()
+        if not game_name or not preset_name:
+            self.status_var.set("Game and preset are required.")
+            return
+
+        preset = self._build_preset_from_rows()
         self.store.save_preset(preset)
-        self.state.load_preset(game_name, character_name, preset_name, preset.to_dict()["bindings"])
+        self.state.load_preset(game_name, preset.character_name, preset_name, preset.to_dict()["bindings"])
         self.status_var.set(f"Saved {preset_name}.")
+
+    def new_preset(self, preset_name: str) -> None:
+        self.preset_var.set(preset_name)
+        self._clear_rows()
+        self.state.load_preset(
+            self.game_var.get().strip(),
+            self.character_var.get().strip() or "default",
+            preset_name,
+            {},
+        )
+        self.status_var.set(f"New preset {preset_name} ready.")
+
+    def copy_preset(self, new_preset_name: str) -> None:
+        preset = self._build_preset_from_rows(new_preset_name)
+        self.store.save_preset(preset)
+        self.preset_var.set(new_preset_name)
+        self.state.load_preset(preset.game_name, preset.character_name, new_preset_name, preset.to_dict()["bindings"])
+        self.status_var.set(f"Copied to {new_preset_name}.")
+
+    def rename_preset(self, new_preset_name: str) -> None:
+        game_name = self.game_var.get().strip()
+        character_name = self.character_var.get().strip() or "default"
+        preset_name = self.preset_var.get().strip()
+        if not game_name or not preset_name:
+            self.status_var.set("Load a preset before renaming.")
+            return
+        self.store.rename_preset(game_name, character_name, preset_name, new_preset_name)
+        self.preset_var.set(new_preset_name)
+        loaded = self.store.load_preset(game_name, character_name, new_preset_name)
+        self.state.load_preset(game_name, character_name, new_preset_name, loaded.to_dict()["bindings"])
+        self.status_var.set(f"Renamed to {new_preset_name}.")
+
+    def delete_preset(self, confirm: bool = False) -> None:
+        game_name = self.game_var.get().strip()
+        character_name = self.character_var.get().strip() or "default"
+        preset_name = self.preset_var.get().strip()
+        if not game_name or not preset_name:
+            self.status_var.set("Load a preset before deleting.")
+            return
+        if not confirm:
+            confirm = messagebox.askyesno("Delete Preset", f"Delete preset '{preset_name}'?")
+        if not confirm:
+            self.status_var.set("Delete cancelled.")
+            return
+        self.store.delete_preset(game_name, character_name, preset_name)
+        self.preset_var.set("")
+        self._clear_rows()
+        self.state.load_preset(game_name, character_name, "", {})
+        self.status_var.set(f"Deleted {preset_name}.")
+
+    def prompt_new_preset(self) -> None:
+        preset_name = simpledialog.askstring("New Preset", "Preset name:", parent=self.root)
+        if preset_name:
+            self.new_preset(preset_name)
+
+    def prompt_copy_preset(self) -> None:
+        preset_name = simpledialog.askstring("Copy Preset", "New preset name:", parent=self.root)
+        if preset_name:
+            self.copy_preset(preset_name)
+
+    def prompt_rename_preset(self) -> None:
+        preset_name = simpledialog.askstring("Rename Preset", "New preset name:", parent=self.root)
+        if preset_name:
+            self.rename_preset(preset_name)
+
+    def prompt_delete_preset(self) -> None:
+        self.delete_preset()
 
     def run(self) -> None:
         self.root.mainloop()

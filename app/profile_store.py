@@ -53,10 +53,12 @@ class ProfileStore:
         return self.save_preset(preset)
 
     def rename_preset(self, game_name: str, character_name: str, preset_name: str, new_preset_name: str) -> Path:
+        preset = self.load_preset(game_name, character_name, preset_name)
         old_path = self.preset_path(game_name, character_name, preset_name)
-        new_path = self.preset_path(game_name, character_name, new_preset_name)
-        new_path.parent.mkdir(parents=True, exist_ok=True)
-        old_path.replace(new_path)
+        preset.preset_name = new_preset_name
+        new_path = self.save_preset(preset)
+        if old_path.exists() and old_path != new_path:
+            old_path.unlink()
         return new_path
 
     def delete_preset(self, game_name: str, character_name: str, preset_name: str) -> None:
