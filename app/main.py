@@ -6,6 +6,7 @@ from tkinter import messagebox, simpledialog
 from tkinter import TclError
 
 from app.config import AppConfig
+from app.camera import Camera
 from app.controller import Controller
 from app.detection import detect_actions
 from app.editor_state import EditorState
@@ -47,6 +48,7 @@ class ProfileEditorApp:
         self.state = EditorState()
         self.last_frame = None
         self.last_events: list[tuple[str, object, str]] = []
+        self.camera = Camera()
         self.input_mapper = InputMapper(sender=self._record_output_event)
         self.controller = Controller(detector=self._detect_frame, mapper=self._apply_actions)
         self._headless = False
@@ -190,6 +192,17 @@ class ProfileEditorApp:
         self.input_mapper.apply_actions(actions, preset)
         self.actions_var.set(", ".join(sorted(actions)))
 
+    def process_current_frame(self):
+        frame = self.camera.read()
+        if frame is None:
+            self.camera_status_var.set("No camera frame")
+            return {"actions": set(), "running": self.controller.status.running}
+        self.last_frame = frame
+        preset = self._current_preset()
+        result = self.controller.process_frame(frame, preset)
+        self.actions_var.set(", ".join(sorted(result["actions"])))
+        return result
+
     def _build_preset_from_rows(self, preset_name: str | None = None):
         from app.profile_models import Binding, Preset
 
@@ -300,11 +313,16 @@ class ProfileEditorApp:
         self.delete_preset()
 
     def start_control(self) -> None:
+        status = self.camera.open()
         self.controller.start()
-        self.camera_status_var.set("Control running")
+        if status.running:
+            self.camera_status_var.set("Control running")
+        else:
+            self.camera_status_var.set(status.last_error or "Camera failed")
 
     def stop_control(self) -> None:
         self.controller.stop()
+        self.camera.close()
         self.camera_status_var.set("Control stopped")
 
     def run(self) -> None:

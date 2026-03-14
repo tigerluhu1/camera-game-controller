@@ -1,4 +1,4 @@
-from app.input_mapper import InputMapper
+from app.input_mapper import DirectInputSender, InputMapper
 from app.profile_models import Binding, Preset
 
 
@@ -50,3 +50,28 @@ def test_mapper_emits_relative_mouse_move():
     mapper.apply_mouse_delta((12, -6), preset)
 
     assert events == [("mouse", (12, -6), "move")]
+
+
+def test_direct_input_sender_routes_events_to_backend():
+    calls = []
+
+    class FakeBackend:
+        def press(self, key):
+            calls.append(("press", key))
+
+        def moveRel(self, x, y, relative=True):
+            calls.append(("moveRel", x, y, relative))
+
+        def click(self, button="left"):
+            calls.append(("click", button))
+
+    sender = DirectInputSender(backend=FakeBackend())
+    sender("key", "1", "tap")
+    sender("mouse", (10, -5), "move")
+    sender("mouse", "left_click", "tap")
+
+    assert calls == [
+        ("press", "1"),
+        ("moveRel", 10, -5, True),
+        ("click", "left"),
+    ]
