@@ -68,7 +68,12 @@ class ProfileEditorApp:
         self.controller = Controller(detector=self._detect_frame, mapper=self._apply_actions)
         self.runtime_defaults = self.runtime_store.load()
         self.current_runtime_overrides: dict[str, float | int] = {}
-        self.body_mouse_mapper = BodyMouseMapper(anchor=self.runtime_defaults.get("mouse_anchor", "shoulders"))
+        self.body_mouse_mapper = BodyMouseMapper(anchor=self.runtime_defaults.get("mouse_anchor", BodyMouseMapper.SHOULDERS))
+        self._anchor_display_map = {
+            BodyMouseMapper.SHOULDERS: "肩膀中心",
+            BodyMouseMapper.HEAD: "头部中心",
+        }
+        self._display_to_anchor = {display: anchor for anchor, display in self._anchor_display_map.items()}
         self._headless = False
         try:
             self.root = tk.Tk()
@@ -84,17 +89,17 @@ class ProfileEditorApp:
             self.game_var = SimpleVar("")
             self.character_var = SimpleVar("default")
             self.preset_var = SimpleVar("")
-            self.status_var = SimpleVar("Ready")
-            self.camera_status_var = SimpleVar("Camera idle")
+            self.status_var = SimpleVar("准备就绪")
+            self.camera_status_var = SimpleVar("摄像头空闲")
             self.actions_var = SimpleVar("")
             self.event_log_var = SimpleVar("")
-            self.fps_var = SimpleVar("FPS: --")
-            self.runtime_source_var = SimpleVar("Global")
+            self.fps_var = SimpleVar("帧率: --")
+            self.runtime_source_var = SimpleVar("全局")
             self.mouse_sensitivity_var = SimpleVar(1.0)
             self.mouse_deadzone_var = SimpleVar(0)
             self.mouse_smoothing_var = SimpleVar(0.0)
             self.camera_device_var = SimpleVar(0)
-            self.mouse_anchor_var = SimpleVar("shoulders")
+            self.mouse_anchor_var = SimpleVar(BodyMouseMapper.SHOULDERS)
             self.row_vars = {}
             for action_name in SUPPORTED_ACTIONS:
                 self.row_vars[action_name] = {
@@ -103,7 +108,7 @@ class ProfileEditorApp:
                     "trigger_mode": SimpleVar("tap"),
                     "cooldown_ms": SimpleVar("0"),
                 }
-            self._load_runtime_into_vars(self.runtime_defaults, source_label="Global")
+            self._load_runtime_into_vars(self.runtime_defaults, source_label="全局")
             return
 
         toolbar = ttk.Frame(self.root, padding=12)
@@ -114,33 +119,33 @@ class ProfileEditorApp:
         self.preset_var = tk.StringVar()
 
         for label, variable in (
-            ("Game", self.game_var),
-            ("Character", self.character_var),
-            ("Preset", self.preset_var),
+            ("游戏", self.game_var),
+            ("角色", self.character_var),
+            ("预设", self.preset_var),
         ):
             ttk.Label(toolbar, text=label).pack(side="left", padx=(0, 6))
             ttk.Entry(toolbar, textvariable=variable, width=18).pack(side="left", padx=(0, 12))
 
-        ttk.Button(toolbar, text="New", command=self.prompt_new_preset).pack(side="left", padx=(0, 6))
-        ttk.Button(toolbar, text="Copy", command=self.prompt_copy_preset).pack(side="left", padx=(0, 6))
-        ttk.Button(toolbar, text="Rename", command=self.prompt_rename_preset).pack(side="left", padx=(0, 6))
-        ttk.Button(toolbar, text="Delete", command=self.prompt_delete_preset).pack(side="left", padx=(0, 12))
-        ttk.Button(toolbar, text="Load", command=self.load_preset).pack(side="left", padx=(0, 6))
-        ttk.Button(toolbar, text="Save", command=self.save_preset).pack(side="left")
-        ttk.Button(toolbar, text="Start Control", command=self.start_control).pack(side="left", padx=(12, 6))
-        ttk.Button(toolbar, text="Stop Control", command=self.stop_control).pack(side="left")
+        ttk.Button(toolbar, text="新建", command=self.prompt_new_preset).pack(side="left", padx=(0, 6))
+        ttk.Button(toolbar, text="复制", command=self.prompt_copy_preset).pack(side="left", padx=(0, 6))
+        ttk.Button(toolbar, text="重命名", command=self.prompt_rename_preset).pack(side="left", padx=(0, 6))
+        ttk.Button(toolbar, text="删除", command=self.prompt_delete_preset).pack(side="left", padx=(0, 12))
+        ttk.Button(toolbar, text="加载", command=self.load_preset).pack(side="left", padx=(0, 6))
+        ttk.Button(toolbar, text="保存", command=self.save_preset).pack(side="left")
+        ttk.Button(toolbar, text="开始控制", command=self.start_control).pack(side="left", padx=(12, 6))
+        ttk.Button(toolbar, text="停止控制", command=self.stop_control).pack(side="left")
 
-        self.status_var = tk.StringVar(value="Ready")
+        self.status_var = tk.StringVar(value="准备就绪")
         ttk.Label(self.root, textvariable=self.status_var, padding=(12, 4)).pack(fill="x")
-        self.camera_status_var = tk.StringVar(value="Camera idle")
+        self.camera_status_var = tk.StringVar(value="摄像头空闲")
         ttk.Label(self.root, textvariable=self.camera_status_var, padding=(12, 0)).pack(fill="x")
         self.actions_var = tk.StringVar(value="")
         ttk.Label(self.root, textvariable=self.actions_var, padding=(12, 0)).pack(fill="x")
         self.event_log_var = tk.StringVar(value="")
         ttk.Label(self.root, textvariable=self.event_log_var, padding=(12, 0)).pack(fill="x")
-        self.fps_var = tk.StringVar(value="FPS: --")
+        self.fps_var = tk.StringVar(value="帧率: --")
         ttk.Label(self.root, textvariable=self.fps_var, padding=(12, 0)).pack(fill="x")
-        self.runtime_source_var = tk.StringVar(value="Global")
+        self.runtime_source_var = tk.StringVar(value="全局")
         ttk.Label(self.root, textvariable=self.runtime_source_var, padding=(12, 0)).pack(fill="x")
 
         content = ttk.Frame(self.root, padding=12)
@@ -179,34 +184,41 @@ class ProfileEditorApp:
 
         preview_panel = ttk.Frame(content, padding=(12, 0))
         preview_panel.pack(side="right", fill="y")
-        ttk.Label(preview_panel, text="Camera Preview").pack(anchor="w")
+        ttk.Label(preview_panel, text="摄像头预览").pack(anchor="w")
         self.camera_device_var = tk.IntVar(value=self.camera.device_index)
         self.mouse_sensitivity_var = tk.DoubleVar(value=self.input_mapper.mouse_sensitivity)
         self.mouse_deadzone_var = tk.IntVar(value=self.input_mapper.mouse_deadzone)
         self.mouse_smoothing_var = tk.DoubleVar(value=self.input_mapper.mouse_smoothing)
         self.mouse_anchor_var = tk.StringVar(value=self.runtime_defaults.get("mouse_anchor", BodyMouseMapper.SHOULDERS))
-        ttk.Label(preview_panel, text="Camera Device").pack(anchor="w", pady=(8, 0))
+        self.mouse_anchor_display_var = tk.StringVar(
+            value=self._anchor_display_map.get(
+                self.mouse_anchor_var.get(), self._anchor_display_map[BodyMouseMapper.SHOULDERS]
+            )
+        )
+        ttk.Label(preview_panel, text="摄像头设备").pack(anchor="w", pady=(8, 0))
         ttk.Spinbox(preview_panel, from_=0, to=5, textvariable=self.camera_device_var, width=8).pack(anchor="w")
-        ttk.Label(preview_panel, text="Mouse Sensitivity").pack(anchor="w", pady=(8, 0))
+        ttk.Label(preview_panel, text="鼠标灵敏度").pack(anchor="w", pady=(8, 0))
         ttk.Scale(preview_panel, from_=0.1, to=5.0, variable=self.mouse_sensitivity_var, orient="horizontal").pack(anchor="w", fill="x")
-        ttk.Label(preview_panel, text="Mouse Deadzone").pack(anchor="w", pady=(8, 0))
+        ttk.Label(preview_panel, text="鼠标死区").pack(anchor="w", pady=(8, 0))
         ttk.Spinbox(preview_panel, from_=0, to=100, textvariable=self.mouse_deadzone_var, width=8).pack(anchor="w")
-        ttk.Label(preview_panel, text="Mouse Smoothing").pack(anchor="w", pady=(8, 0))
+        ttk.Label(preview_panel, text="鼠标平滑").pack(anchor="w", pady=(8, 0))
         ttk.Scale(preview_panel, from_=0.0, to=0.95, variable=self.mouse_smoothing_var, orient="horizontal").pack(anchor="w", fill="x")
-        ttk.Label(preview_panel, text="Mouse Anchor").pack(anchor="w", pady=(8, 0))
-        ttk.Combobox(
+        ttk.Label(preview_panel, text="鼠标锚点").pack(anchor="w", pady=(8, 0))
+        anchor_box = ttk.Combobox(
             preview_panel,
-            textvariable=self.mouse_anchor_var,
-            values=(BodyMouseMapper.SHOULDERS, BodyMouseMapper.HEAD),
+            textvariable=self.mouse_anchor_display_var,
+            values=list(self._anchor_display_map.values()),
             state="readonly",
             width=12,
-        ).pack(anchor="w")
-        ttk.Button(preview_panel, text="Save Runtime Defaults", command=self.save_runtime_defaults).pack(anchor="w", pady=(8, 0), fill="x")
-        ttk.Button(preview_panel, text="Save Runtime To Preset", command=self.save_runtime_to_preset).pack(anchor="w", pady=(4, 0), fill="x")
-        ttk.Button(preview_panel, text="Reset To Defaults", command=self.reset_runtime_to_defaults).pack(anchor="w", pady=(4, 0), fill="x")
-        self.preview_label = ttk.Label(preview_panel, text="No preview", width=40)
+        )
+        anchor_box.pack(anchor="w")
+        anchor_box.bind("<<ComboboxSelected>>", self._on_anchor_display_changed)
+        ttk.Button(preview_panel, text="保存运行默认值", command=self.save_runtime_defaults).pack(anchor="w", pady=(8, 0), fill="x")
+        ttk.Button(preview_panel, text="保存到当前预设", command=self.save_runtime_to_preset).pack(anchor="w", pady=(4, 0), fill="x")
+        ttk.Button(preview_panel, text="重置为默认", command=self.reset_runtime_to_defaults).pack(anchor="w", pady=(4, 0), fill="x")
+        self.preview_label = ttk.Label(preview_panel, text="暂无预览", width=40)
         self.preview_label.pack(anchor="w", pady=(8, 0))
-        self._load_runtime_into_vars(self.runtime_defaults, source_label="Global")
+        self._load_runtime_into_vars(self.runtime_defaults, source_label="全局")
 
     def _current_runtime_values(self) -> dict[str, float | int]:
         return {
@@ -223,23 +235,37 @@ class ProfileEditorApp:
         self.mouse_smoothing_var.set(float(values["mouse_smoothing"]))
         self.camera_device_var.set(int(values["camera_device"]))
         self.mouse_anchor_var.set(str(values.get("mouse_anchor", BodyMouseMapper.SHOULDERS)))
+        if hasattr(self, "mouse_anchor_display_var"):
+            display = self._anchor_display_map.get(
+                self.mouse_anchor_var.get(), self._anchor_display_map[BodyMouseMapper.SHOULDERS]
+            )
+            self.mouse_anchor_display_var.set(display)
         self.runtime_source_var.set(source_label)
         self.apply_runtime_settings()
 
     def _resolved_runtime_settings(self, preset_overrides: dict[str, float | int] | None = None) -> dict[str, float | int]:
         return resolve_runtime_settings(self.runtime_defaults, preset_overrides or self.current_runtime_overrides)
 
+    def _on_anchor_display_changed(self, *_):
+        if not hasattr(self, "mouse_anchor_display_var"):
+            return
+        display = self.mouse_anchor_display_var.get()
+        anchor = self._display_to_anchor.get(display, BodyMouseMapper.SHOULDERS)
+        self.mouse_anchor_var.set(anchor)
+        self.body_mouse_mapper.anchor = anchor
+        self.apply_runtime_settings()
+
     def load_preset(self) -> None:
         game_name = self.game_var.get().strip()
         character_name = self.character_var.get().strip() or "default"
         preset_name = self.preset_var.get().strip()
         if not game_name or not preset_name:
-            self.status_var.set("Enter a game and preset name to load.")
+            self.status_var.set("请输入游戏和预设名称进行加载。")
             return
         try:
             preset = self.store.load_preset(game_name, character_name, preset_name)
         except FileNotFoundError:
-            self.status_var.set("Preset not found.")
+            self.status_var.set("未找到预设。")
             return
         self.state.load_preset(game_name, character_name, preset_name, preset.to_dict()["bindings"])
         for action_name in SUPPORTED_ACTIONS:
@@ -250,9 +276,9 @@ class ProfileEditorApp:
             row["trigger_mode"].set(binding.trigger_mode if binding else "tap")
             row["cooldown_ms"].set(str(binding.cooldown_ms if binding else 0))
         self.current_runtime_overrides = dict(preset.runtime_overrides)
-        source_label = "Preset Override" if self.current_runtime_overrides else "Global"
+        source_label = "预设覆盖" if self.current_runtime_overrides else "全局"
         self._load_runtime_into_vars(self._resolved_runtime_settings(preset.runtime_overrides), source_label=source_label)
-        self.status_var.set(f"Loaded {preset_name}.")
+        self.status_var.set(f"已加载 {preset_name}。")
 
     def _clear_rows(self) -> None:
         for row in self.row_vars.values():
@@ -273,7 +299,7 @@ class ProfileEditorApp:
         self.direct_input_sender(event_type, value, mode)
 
     def update_fps(self, fps: float) -> None:
-        self.fps_var.set(f"FPS: {fps:.1f}")
+        self.fps_var.set(f"帧率: {fps:.1f}")
 
     def set_camera_device(self, device_index: int) -> None:
         self.camera.device_index = int(device_index)
@@ -284,8 +310,8 @@ class ProfileEditorApp:
         self.input_mapper.mouse_sensitivity = float(self.mouse_sensitivity_var.get())
         self.input_mapper.mouse_deadzone = int(self.mouse_deadzone_var.get())
         self.input_mapper.mouse_smoothing = float(self.mouse_smoothing_var.get())
+        self.body_mouse_mapper.anchor = self.mouse_anchor_var.get()
         self.set_camera_device(int(self.camera_device_var.get()))
-        self.body_mouse_mapper.anchor = str(self.mouse_anchor_var.get())
 
     def _current_preset(self):
         preset_name = self.preset_var.get().strip()
@@ -332,7 +358,7 @@ class ProfileEditorApp:
         self.apply_runtime_settings()
         frame = self.camera.read()
         if frame is None:
-            self.camera_status_var.set("No camera frame")
+            self.camera_status_var.set("未获取到摄像头画面")
             return {"actions": set(), "running": self.controller.status.running}
         self.last_frame = frame
         preset = self._current_preset()
@@ -345,14 +371,14 @@ class ProfileEditorApp:
             result.get("landmarks", {}),
             result["actions"],
         )
-        self.preview_status = "Preview updated"
+        self.preview_status = "预览已更新"
         if not self._headless and self.preview_image is not None:
             try:
                 self.preview_photo = ImageTk.PhotoImage(self.preview_image)
                 self.preview_label.configure(image=self.preview_photo, text="")
             except TclError:
                 self.preview_photo = None
-                self.preview_label.configure(text="Preview updated")
+                self.preview_label.configure(text="预览已更新")
         now = time.perf_counter()
         if self._last_tick_time is not None:
             elapsed = now - self._last_tick_time
@@ -395,15 +421,15 @@ class ProfileEditorApp:
         self.runtime_defaults = self._current_runtime_values()
         self.runtime_store.save(self.runtime_defaults)
         if not self.current_runtime_overrides:
-            self._load_runtime_into_vars(self.runtime_defaults, source_label="Global")
+            self._load_runtime_into_vars(self.runtime_defaults, source_label="全局")
         else:
-            self.runtime_source_var.set("Preset Override")
+            self.runtime_source_var.set("预设覆盖")
             self.apply_runtime_settings()
-        self.status_var.set("Saved runtime defaults.")
+        self.status_var.set("运行参数默认设置已保存。")
 
     def save_runtime_to_preset(self) -> None:
         if not self.game_var.get().strip() or not self.preset_var.get().strip():
-            self.status_var.set("Game and preset are required.")
+            self.status_var.set("游戏和预设是必填项。")
             return
         current = self._current_runtime_values()
         overrides = {
@@ -412,9 +438,9 @@ class ProfileEditorApp:
             if self.runtime_defaults.get(key) != value
         }
         self.current_runtime_overrides = overrides
-        self.runtime_source_var.set("Preset Override" if overrides else "Global")
+        self.runtime_source_var.set("预设覆盖" if overrides else "全局")
         self.apply_runtime_settings()
-        self.status_var.set("Runtime settings attached to preset.")
+        self.status_var.set("运行设置已关联到预设。")
 
     def reset_runtime_to_defaults(self) -> None:
         self.current_runtime_overrides = {}
@@ -424,92 +450,92 @@ class ProfileEditorApp:
             preset = self._build_preset_from_rows()
             preset.runtime_overrides = {}
             self.store.save_preset(preset)
-        self._load_runtime_into_vars(self.runtime_defaults, source_label="Global")
-        self.status_var.set("Runtime settings reset to defaults.")
+        self._load_runtime_into_vars(self.runtime_defaults, source_label="全局")
+        self.status_var.set("运行参数已重置为默认。")
 
     def save_preset(self) -> None:
         game_name = self.game_var.get().strip()
         preset_name = self.preset_var.get().strip()
         if not game_name or not preset_name:
-            self.status_var.set("Game and preset are required.")
+            self.status_var.set("游戏和预设是必填项。")
             return
 
         preset = self._build_preset_from_rows()
         self.store.save_preset(preset)
         self.state.load_preset(game_name, preset.character_name, preset_name, preset.to_dict()["bindings"])
-        self.status_var.set(f"Saved {preset_name}.")
+        self.status_var.set(f"已保存 {preset_name}。")
 
     def new_preset(self, preset_name: str) -> None:
         self.preset_var.set(preset_name)
         self._clear_rows()
         self.current_runtime_overrides = {}
-        self._load_runtime_into_vars(self.runtime_defaults, source_label="Global")
+        self._load_runtime_into_vars(self.runtime_defaults, source_label="全局")
         self.state.load_preset(
             self.game_var.get().strip(),
             self.character_var.get().strip() or "default",
             preset_name,
             {},
         )
-        self.status_var.set(f"New preset {preset_name} ready.")
+        self.status_var.set(f"新预设 {preset_name} 已就绪。")
 
     def copy_preset(self, new_preset_name: str) -> None:
         preset = self._build_preset_from_rows(new_preset_name)
         self.store.save_preset(preset)
         self.preset_var.set(new_preset_name)
         self.state.load_preset(preset.game_name, preset.character_name, new_preset_name, preset.to_dict()["bindings"])
-        self.status_var.set(f"Copied to {new_preset_name}.")
+        self.status_var.set(f"已复制为 {new_preset_name}。")
 
     def rename_preset(self, new_preset_name: str) -> None:
         game_name = self.game_var.get().strip()
         character_name = self.character_var.get().strip() or "default"
         preset_name = self.preset_var.get().strip()
         if not game_name or not preset_name:
-            self.status_var.set("Load a preset before renaming.")
+            self.status_var.set("请先加载预设再重命名。")
             return
         self.store.rename_preset(game_name, character_name, preset_name, new_preset_name)
         self.preset_var.set(new_preset_name)
         loaded = self.store.load_preset(game_name, character_name, new_preset_name)
         self.state.load_preset(game_name, character_name, new_preset_name, loaded.to_dict()["bindings"])
-        self.status_var.set(f"Renamed to {new_preset_name}.")
+        self.status_var.set(f"已重命名为 {new_preset_name}。")
 
     def delete_preset(self, confirm: bool = False) -> None:
         game_name = self.game_var.get().strip()
         character_name = self.character_var.get().strip() or "default"
         preset_name = self.preset_var.get().strip()
         if not game_name or not preset_name:
-            self.status_var.set("Load a preset before deleting.")
+            self.status_var.set("请先加载预设再删除。")
             return
         if not confirm:
-            confirm = messagebox.askyesno("Delete Preset", f"Delete preset '{preset_name}'?")
+            confirm = messagebox.askyesno("删除预设", f"确定要删除预设「{preset_name}」吗？")
         if not confirm:
-            self.status_var.set("Delete cancelled.")
+            self.status_var.set("已取消删除。")
             return
         self.store.delete_preset(game_name, character_name, preset_name)
         self.preset_var.set("")
         self._clear_rows()
         self.current_runtime_overrides = {}
-        self._load_runtime_into_vars(self.runtime_defaults, source_label="Global")
+        self._load_runtime_into_vars(self.runtime_defaults, source_label="全局")
         self.state.load_preset(game_name, character_name, "", {})
-        self.status_var.set(f"Deleted {preset_name}.")
+        self.status_var.set(f"已删除 {preset_name}。")
 
     def prompt_new_preset(self) -> None:
         if self._headless:
             return
-        preset_name = simpledialog.askstring("New Preset", "Preset name:", parent=self.root)
+        preset_name = simpledialog.askstring("新建预设", "预设名称：", parent=self.root)
         if preset_name:
             self.new_preset(preset_name)
 
     def prompt_copy_preset(self) -> None:
         if self._headless:
             return
-        preset_name = simpledialog.askstring("Copy Preset", "New preset name:", parent=self.root)
+        preset_name = simpledialog.askstring("复制预设", "新预设名称：", parent=self.root)
         if preset_name:
             self.copy_preset(preset_name)
 
     def prompt_rename_preset(self) -> None:
         if self._headless:
             return
-        preset_name = simpledialog.askstring("Rename Preset", "New preset name:", parent=self.root)
+        preset_name = simpledialog.askstring("重命名预设", "新预设名称：", parent=self.root)
         if preset_name:
             self.rename_preset(preset_name)
 
@@ -522,16 +548,16 @@ class ProfileEditorApp:
         status = self.camera.open()
         if status.running:
             self.controller.start()
-            self.camera_status_var.set("Control running")
+            self.camera_status_var.set("控制已启动")
             self.control_tick()
         else:
             self.controller.stop()
-            self.camera_status_var.set(status.last_error or "Camera failed")
+            self.camera_status_var.set(status.last_error or "摄像头启动失败")
 
     def stop_control(self) -> None:
         self.controller.stop()
         self.camera.close()
-        self.camera_status_var.set("Control stopped")
+        self.camera_status_var.set("控制已停止")
 
     def run(self) -> None:
         self.root.mainloop()

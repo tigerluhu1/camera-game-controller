@@ -63,7 +63,7 @@ def test_process_current_frame_updates_actions_and_events(tmp_path):
     assert result["actions"] == {"raise_right_hand"}
     assert app.actions_var.get() == "raise_right_hand"
     assert app.last_events[-1] == ("key", "1", "tap")
-    assert app.preview_status == "Preview updated"
+    assert app.preview_status == "预览已更新"
     assert app.preview_image is not None
     app.root.destroy()
 
@@ -154,7 +154,7 @@ def test_runtime_defaults_and_overrides_round_trip_through_ui(tmp_path):
     assert app.mouse_deadzone_var.get() == 11
     assert app.mouse_smoothing_var.get() == 0.45
     assert app.camera_device_var.get() == 4
-    assert app.runtime_source_var.get() == "Preset Override"
+    assert app.runtime_source_var.get() == "预设覆盖"
     app.root.destroy()
 
 
@@ -176,7 +176,7 @@ def test_reset_runtime_to_defaults_clears_preset_override(tmp_path):
     app.reset_runtime_to_defaults()
 
     assert app.mouse_sensitivity_var.get() == 1.5
-    assert app.runtime_source_var.get() == "Global"
+    assert app.runtime_source_var.get() == "全局"
     loaded = app.store.load_preset("wow", "mage", "pve")
     assert loaded.runtime_overrides == {}
     app.root.destroy()
@@ -233,4 +233,13 @@ def test_body_anchor_triggers_mouse_delta(tmp_path):
     assert deltas
     dx, _ = deltas[0]
     assert dx < 0
+    app.root.destroy()
+
+
+def test_ui_strings_are_chinese(tmp_path):
+    app = create_app(AppConfig(base_dir=tmp_path))
+
+    assert app.status_var.get() == "准备就绪"
+    assert app.camera_status_var.get() == "摄像头空闲"
+    assert app.preview_label.cget("text") == "暂无预览"
     app.root.destroy()
