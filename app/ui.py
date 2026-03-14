@@ -9,6 +9,7 @@ SUPPORTED_ACTIONS = [
     "right_fist",
     "left_open_palm",
     "right_open_palm",
+    "mouse_move",
 ]
 
 

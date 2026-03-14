@@ -10,6 +10,7 @@ def test_runtime_settings_store_reads_written_defaults(tmp_path: Path):
         "mouse_deadzone": 9,
         "mouse_smoothing": 0.4,
         "camera_device": 2,
+        "mouse_anchor": "shoulders",
     }
 
     store.save(defaults)
@@ -42,4 +43,5 @@ def test_resolve_runtime_settings_applies_preset_overrides(tmp_path: Path):
         "mouse_deadzone": 7,
         "mouse_smoothing": 0.2,
         "camera_device": 3,
+        "mouse_anchor": "shoulders",
     }

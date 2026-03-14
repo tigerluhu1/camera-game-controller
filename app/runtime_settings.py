@@ -9,6 +9,7 @@ RUNTIME_DEFAULTS = {
     "mouse_deadzone": 0,
     "mouse_smoothing": 0.0,
     "camera_device": 0,
+    "mouse_anchor": "shoulders",
 }
 
 
@@ -19,6 +20,7 @@ def _coerce_runtime_settings(values: dict | None) -> dict[str, float | int]:
     data["mouse_deadzone"] = int(source.get("mouse_deadzone", data["mouse_deadzone"]))
     data["mouse_smoothing"] = float(source.get("mouse_smoothing", data["mouse_smoothing"]))
     data["camera_device"] = int(source.get("camera_device", data["camera_device"]))
+    data["mouse_anchor"] = str(source.get("mouse_anchor", data["mouse_anchor"]))
     return data
 
 

@@ -1,4 +1,5 @@
 from app.config import AppConfig
+from app.detection import LandmarkPoint
 from app.main import create_app
 import numpy as np
 
@@ -178,4 +179,58 @@ def test_reset_runtime_to_defaults_clears_preset_override(tmp_path):
     assert app.runtime_source_var.get() == "Global"
     loaded = app.store.load_preset("wow", "mage", "pve")
     assert loaded.runtime_overrides == {}
+    app.root.destroy()
+
+
+def test_runtime_anchor_default_and_persistence(tmp_path):
+    app = create_app(AppConfig(base_dir=tmp_path))
+    assert app.mouse_anchor_var.get() == "shoulders"
+    app.mouse_anchor_var.set("head")
+    app.save_runtime_defaults()
+
+    reopened = create_app(AppConfig(base_dir=tmp_path))
+
+    assert reopened.mouse_anchor_var.get() == "head"
+    reopened.root.destroy()
+    app.root.destroy()
+
+
+def test_body_anchor_triggers_mouse_delta(tmp_path):
+    app = create_app(AppConfig(base_dir=tmp_path))
+    app.game_var.set("wow")
+    app.character_var.set("mage")
+    app.preset_var.set("pve")
+    app.save_preset()
+
+    class FakeCamera:
+        def open(self):
+            return type("Status", (), {"running": True, "last_error": "", "frame_size": (640, 480)})()
+
+        def read(self):
+            import numpy as np
+
+            return np.zeros((24, 32, 3), dtype="uint8")
+
+        def close(self):
+            return None
+
+    app.camera = FakeCamera()
+    app._detect_frame = lambda frame: {
+        "actions": set(),
+        "landmarks": {
+            "left_shoulder": LandmarkPoint(x=0.2, y=0.5),
+            "right_shoulder": LandmarkPoint(x=0.4, y=0.5),
+        },
+    }
+    app.controller.detector = app._detect_frame
+
+    deltas = []
+    app.input_mapper.apply_mouse_delta = lambda delta, preset: deltas.append(delta)
+
+    app.controller.start()
+    app.process_current_frame()
+
+    assert deltas
+    dx, _ = deltas[0]
+    assert dx < 0
     app.root.destroy()

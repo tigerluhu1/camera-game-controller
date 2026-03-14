@@ -8,6 +8,7 @@ from tkinter import TclError
 from PIL import ImageTk
 
 from app.config import AppConfig
+from app.body_mouse_mapper import BodyMouseMapper
 from app.camera import Camera
 from app.controller import Controller
 from app.detection import detect_actions
@@ -67,6 +68,7 @@ class ProfileEditorApp:
         self.controller = Controller(detector=self._detect_frame, mapper=self._apply_actions)
         self.runtime_defaults = self.runtime_store.load()
         self.current_runtime_overrides: dict[str, float | int] = {}
+        self.body_mouse_mapper = BodyMouseMapper(anchor=self.runtime_defaults.get("mouse_anchor", "shoulders"))
         self._headless = False
         try:
             self.root = tk.Tk()
@@ -92,6 +94,7 @@ class ProfileEditorApp:
             self.mouse_deadzone_var = SimpleVar(0)
             self.mouse_smoothing_var = SimpleVar(0.0)
             self.camera_device_var = SimpleVar(0)
+            self.mouse_anchor_var = SimpleVar("shoulders")
             self.row_vars = {}
             for action_name in SUPPORTED_ACTIONS:
                 self.row_vars[action_name] = {
@@ -181,6 +184,7 @@ class ProfileEditorApp:
         self.mouse_sensitivity_var = tk.DoubleVar(value=self.input_mapper.mouse_sensitivity)
         self.mouse_deadzone_var = tk.IntVar(value=self.input_mapper.mouse_deadzone)
         self.mouse_smoothing_var = tk.DoubleVar(value=self.input_mapper.mouse_smoothing)
+        self.mouse_anchor_var = tk.StringVar(value=self.runtime_defaults.get("mouse_anchor", BodyMouseMapper.SHOULDERS))
         ttk.Label(preview_panel, text="Camera Device").pack(anchor="w", pady=(8, 0))
         ttk.Spinbox(preview_panel, from_=0, to=5, textvariable=self.camera_device_var, width=8).pack(anchor="w")
         ttk.Label(preview_panel, text="Mouse Sensitivity").pack(anchor="w", pady=(8, 0))
@@ -189,6 +193,14 @@ class ProfileEditorApp:
         ttk.Spinbox(preview_panel, from_=0, to=100, textvariable=self.mouse_deadzone_var, width=8).pack(anchor="w")
         ttk.Label(preview_panel, text="Mouse Smoothing").pack(anchor="w", pady=(8, 0))
         ttk.Scale(preview_panel, from_=0.0, to=0.95, variable=self.mouse_smoothing_var, orient="horizontal").pack(anchor="w", fill="x")
+        ttk.Label(preview_panel, text="Mouse Anchor").pack(anchor="w", pady=(8, 0))
+        ttk.Combobox(
+            preview_panel,
+            textvariable=self.mouse_anchor_var,
+            values=(BodyMouseMapper.SHOULDERS, BodyMouseMapper.HEAD),
+            state="readonly",
+            width=12,
+        ).pack(anchor="w")
         ttk.Button(preview_panel, text="Save Runtime Defaults", command=self.save_runtime_defaults).pack(anchor="w", pady=(8, 0), fill="x")
         ttk.Button(preview_panel, text="Save Runtime To Preset", command=self.save_runtime_to_preset).pack(anchor="w", pady=(4, 0), fill="x")
         ttk.Button(preview_panel, text="Reset To Defaults", command=self.reset_runtime_to_defaults).pack(anchor="w", pady=(4, 0), fill="x")
@@ -202,6 +214,7 @@ class ProfileEditorApp:
             "mouse_deadzone": int(self.mouse_deadzone_var.get()),
             "mouse_smoothing": float(self.mouse_smoothing_var.get()),
             "camera_device": int(self.camera_device_var.get()),
+            "mouse_anchor": str(self.mouse_anchor_var.get()),
         }
 
     def _load_runtime_into_vars(self, values: dict[str, float | int], source_label: str) -> None:
@@ -209,6 +222,7 @@ class ProfileEditorApp:
         self.mouse_deadzone_var.set(int(values["mouse_deadzone"]))
         self.mouse_smoothing_var.set(float(values["mouse_smoothing"]))
         self.camera_device_var.set(int(values["camera_device"]))
+        self.mouse_anchor_var.set(str(values.get("mouse_anchor", BodyMouseMapper.SHOULDERS)))
         self.runtime_source_var.set(source_label)
         self.apply_runtime_settings()
 
@@ -271,6 +285,7 @@ class ProfileEditorApp:
         self.input_mapper.mouse_deadzone = int(self.mouse_deadzone_var.get())
         self.input_mapper.mouse_smoothing = float(self.mouse_smoothing_var.get())
         self.set_camera_device(int(self.camera_device_var.get()))
+        self.body_mouse_mapper.anchor = str(self.mouse_anchor_var.get())
 
     def _current_preset(self):
         preset_name = self.preset_var.get().strip()
@@ -294,6 +309,25 @@ class ProfileEditorApp:
         self.input_mapper.apply_actions(actions, preset)
         self.actions_var.set(", ".join(sorted(actions)))
 
+    def _apply_body_mouse_movement(self, landmarks: dict, frame, preset) -> None:
+        if not self.controller.status.running or preset is None:
+            return
+        size = self._frame_size(frame)
+        if size is None:
+            return
+        delta = self.body_mouse_mapper.compute_mouse_delta(landmarks or {}, size)
+        if delta == (0, 0):
+            return
+        self.input_mapper.apply_mouse_delta(delta, preset)
+
+    def _frame_size(self, frame) -> tuple[int, int] | None:
+        if frame is None:
+            return None
+        shape = getattr(frame, "shape", None)
+        if not shape or len(shape) < 2:
+            return None
+        return (shape[1], shape[0])
+
     def process_current_frame(self):
         self.apply_runtime_settings()
         frame = self.camera.read()
@@ -304,6 +338,8 @@ class ProfileEditorApp:
         preset = self._current_preset()
         result = self.controller.process_frame(frame, preset)
         self.actions_var.set(", ".join(sorted(result["actions"])))
+        if result["running"]:
+            self._apply_body_mouse_movement(result.get("landmarks", {}), frame, preset)
         self.preview_image = render_preview_frame(
             frame,
             result.get("landmarks", {}),
