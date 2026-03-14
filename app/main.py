@@ -10,10 +10,10 @@ from app.camera import Camera
 from app.controller import Controller
 from app.detection import detect_actions
 from app.editor_state import EditorState
-from app.input_mapper import InputMapper
+from app.input_mapper import DirectInputSender, InputMapper
 from app.profile_store import ProfileStore
 from app.ui import SUPPORTED_ACTIONS
-from app.vision_backend import normalize_result
+from app.vision_backend import MediaPipeVisionBackend
 
 
 class SimpleVar:
@@ -40,6 +40,9 @@ class HeadlessRoot:
     def mainloop(self) -> None:
         return None
 
+    def after(self, _delay_ms: int, callback) -> None:
+        callback()
+
 
 class ProfileEditorApp:
     def __init__(self, config: AppConfig):
@@ -49,7 +52,10 @@ class ProfileEditorApp:
         self.last_frame = None
         self.last_events: list[tuple[str, object, str]] = []
         self.camera = Camera()
-        self.input_mapper = InputMapper(sender=self._record_output_event)
+        self.preview_status = "No preview"
+        self.direct_input_sender = DirectInputSender()
+        self.vision_backend = MediaPipeVisionBackend()
+        self.input_mapper = InputMapper(sender=self._dispatch_output_event)
         self.controller = Controller(detector=self._detect_frame, mapper=self._apply_actions)
         self._headless = False
         try:
@@ -174,6 +180,10 @@ class ProfileEditorApp:
         self.last_events.append((event_type, value, mode))
         self.last_events = self.last_events[-10:]
 
+    def _dispatch_output_event(self, event_type: str, value: object, mode: str) -> None:
+        self._record_output_event(event_type, value, mode)
+        self.direct_input_sender(event_type, value, mode)
+
     def _current_preset(self):
         preset_name = self.preset_var.get().strip()
         game_name = self.game_var.get().strip()
@@ -182,8 +192,8 @@ class ProfileEditorApp:
         return self._build_preset_from_rows()
 
     def _detect_frame(self, frame) -> dict:
-        normalized = normalize_result({}, {})
-        actions = detect_actions(normalized.landmarks, normalized.hand_states)
+        vision_result = self.vision_backend.process_frame(frame)
+        actions = detect_actions(vision_result.landmarks, vision_result.hand_states)
         return {"actions": actions}
 
     def _apply_actions(self, actions: set[str], preset) -> None:
@@ -198,10 +208,18 @@ class ProfileEditorApp:
             self.camera_status_var.set("No camera frame")
             return {"actions": set(), "running": self.controller.status.running}
         self.last_frame = frame
+        self.preview_status = "Preview updated"
         preset = self._current_preset()
         result = self.controller.process_frame(frame, preset)
         self.actions_var.set(", ".join(sorted(result["actions"])))
         return result
+
+    def control_tick(self) -> None:
+        if not self.controller.status.running:
+            return
+        self.process_current_frame()
+        if not self._headless and hasattr(self.root, "after"):
+            self.root.after(33, self.control_tick)
 
     def _build_preset_from_rows(self, preset_name: str | None = None):
         from app.profile_models import Binding, Preset
@@ -314,10 +332,12 @@ class ProfileEditorApp:
 
     def start_control(self) -> None:
         status = self.camera.open()
-        self.controller.start()
         if status.running:
+            self.controller.start()
             self.camera_status_var.set("Control running")
+            self.control_tick()
         else:
+            self.controller.stop()
             self.camera_status_var.set(status.last_error or "Camera failed")
 
     def stop_control(self) -> None:

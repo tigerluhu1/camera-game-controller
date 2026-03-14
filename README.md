@@ -8,6 +8,8 @@ A Python desktop prototype for managing camera-driven game control presets.
 pip install -r requirements.txt
 ```
 
+The first real vision run downloads MediaPipe task models into `models/` automatically.
+
 ## Current Features
 
 - Save presets under `profiles/<game>/<character>/<preset>.json`
@@ -17,6 +19,7 @@ pip install -r requirements.txt
 - Track unsaved changes in editor state
 - Start and stop a camera-control loop safely
 - Process frames through a controller pipeline and route mapped key or mouse events
+- Initialize real MediaPipe pose and hand landmark backends on demand
 
 ## Supported Actions
 
@@ -58,10 +61,11 @@ pytest -v
 2. Run `python -m app.main`
 3. Create or load a preset with at least one key binding, such as `raise_right_hand -> 1`
 4. Click `Start Control`
-5. Confirm the camera status changes from idle to running, or shows a clear backend error
-6. Confirm the app updates detected actions when frames are processed
-7. Confirm no input is sent before `Start Control`
-8. Confirm `Stop Control` halts control and closes the camera backend
+5. Wait for the first run to download MediaPipe models into `models/` if needed
+6. Confirm the camera status changes from idle to running, or shows a clear backend error
+7. Confirm the app updates detected actions when frames are processed
+8. Confirm no input is sent before `Start Control`
+9. Confirm `Stop Control` halts control and closes the camera backend
 
 ## Preset Layout
 
