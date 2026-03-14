@@ -1,0 +1,1 @@
+"""Camera game controller package."""
