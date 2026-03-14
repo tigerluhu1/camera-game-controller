@@ -4,6 +4,7 @@ import tkinter as tk
 from tkinter import ttk
 from tkinter import messagebox, simpledialog
 from tkinter import TclError
+from PIL import ImageTk
 
 from app.config import AppConfig
 from app.camera import Camera
@@ -11,6 +12,7 @@ from app.controller import Controller
 from app.detection import detect_actions
 from app.editor_state import EditorState
 from app.input_mapper import DirectInputSender, InputMapper
+from app.preview import render_preview_frame
 from app.profile_store import ProfileStore
 from app.ui import SUPPORTED_ACTIONS
 from app.vision_backend import MediaPipeVisionBackend
@@ -53,6 +55,8 @@ class ProfileEditorApp:
         self.last_events: list[tuple[str, object, str]] = []
         self.camera = Camera()
         self.preview_status = "No preview"
+        self.preview_image = None
+        self.preview_photo = None
         self.direct_input_sender = DirectInputSender()
         self.vision_backend = MediaPipeVisionBackend()
         self.input_mapper = InputMapper(sender=self._dispatch_output_event)
@@ -75,6 +79,7 @@ class ProfileEditorApp:
             self.status_var = SimpleVar("Ready")
             self.camera_status_var = SimpleVar("Camera idle")
             self.actions_var = SimpleVar("")
+            self.event_log_var = SimpleVar("")
             self.row_vars = {}
             for action_name in SUPPORTED_ACTIONS:
                 self.row_vars[action_name] = {
@@ -115,9 +120,14 @@ class ProfileEditorApp:
         ttk.Label(self.root, textvariable=self.camera_status_var, padding=(12, 0)).pack(fill="x")
         self.actions_var = tk.StringVar(value="")
         ttk.Label(self.root, textvariable=self.actions_var, padding=(12, 0)).pack(fill="x")
+        self.event_log_var = tk.StringVar(value="")
+        ttk.Label(self.root, textvariable=self.event_log_var, padding=(12, 0)).pack(fill="x")
 
-        table = ttk.Frame(self.root, padding=12)
-        table.pack(fill="both", expand=True)
+        content = ttk.Frame(self.root, padding=12)
+        content.pack(fill="both", expand=True)
+
+        table = ttk.Frame(content)
+        table.pack(side="left", fill="both", expand=True)
 
         headings = ("Action", "Enabled", "Input", "Mode", "Cooldown(ms)")
         for column, heading in enumerate(headings):
@@ -146,6 +156,12 @@ class ProfileEditorApp:
                 state="readonly",
             ).grid(row=row_index, column=3, sticky="w", padx=4)
             ttk.Entry(table, textvariable=cooldown_var, width=10).grid(row=row_index, column=4, sticky="w", padx=4)
+
+        preview_panel = ttk.Frame(content, padding=(12, 0))
+        preview_panel.pack(side="right", fill="y")
+        ttk.Label(preview_panel, text="Camera Preview").pack(anchor="w")
+        self.preview_label = ttk.Label(preview_panel, text="No preview", width=40)
+        self.preview_label.pack(anchor="w", pady=(8, 0))
 
     def load_preset(self) -> None:
         game_name = self.game_var.get().strip()
@@ -179,6 +195,9 @@ class ProfileEditorApp:
     def _record_output_event(self, event_type: str, value: object, mode: str) -> None:
         self.last_events.append((event_type, value, mode))
         self.last_events = self.last_events[-10:]
+        if hasattr(self, "event_log_var"):
+            lines = [f"{kind}:{value}:{mode}" for kind, value, mode in self.last_events[-5:]]
+            self.event_log_var.set(" | ".join(lines))
 
     def _dispatch_output_event(self, event_type: str, value: object, mode: str) -> None:
         self._record_output_event(event_type, value, mode)
@@ -194,7 +213,11 @@ class ProfileEditorApp:
     def _detect_frame(self, frame) -> dict:
         vision_result = self.vision_backend.process_frame(frame)
         actions = detect_actions(vision_result.landmarks, vision_result.hand_states)
-        return {"actions": actions}
+        return {
+            "actions": actions,
+            "landmarks": vision_result.landmarks,
+            "hand_states": vision_result.hand_states,
+        }
 
     def _apply_actions(self, actions: set[str], preset) -> None:
         if preset is None:
@@ -208,10 +231,22 @@ class ProfileEditorApp:
             self.camera_status_var.set("No camera frame")
             return {"actions": set(), "running": self.controller.status.running}
         self.last_frame = frame
-        self.preview_status = "Preview updated"
         preset = self._current_preset()
         result = self.controller.process_frame(frame, preset)
         self.actions_var.set(", ".join(sorted(result["actions"])))
+        self.preview_image = render_preview_frame(
+            frame,
+            result.get("landmarks", {}),
+            result["actions"],
+        )
+        self.preview_status = "Preview updated"
+        if not self._headless and self.preview_image is not None:
+            try:
+                self.preview_photo = ImageTk.PhotoImage(self.preview_image)
+                self.preview_label.configure(image=self.preview_photo, text="")
+            except TclError:
+                self.preview_photo = None
+                self.preview_label.configure(text="Preview updated")
         return result
 
     def control_tick(self) -> None:

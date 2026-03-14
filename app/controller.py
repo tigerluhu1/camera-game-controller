@@ -28,9 +28,11 @@ class Controller:
         self.status.actions = set()
 
     def process_frame(self, frame: Any, preset: Any) -> dict:
-        result = self.detector(frame)
+        result = dict(self.detector(frame))
         actions = set(result.get("actions", set()))
         self.status.actions = actions
         if self.status.running:
             self.mapper(actions, preset)
-        return {"actions": actions, "running": self.status.running}
+        result["actions"] = actions
+        result["running"] = self.status.running
+        return result

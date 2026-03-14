@@ -1,5 +1,6 @@
 from app.config import AppConfig
 from app.main import create_app
+import numpy as np
 
 
 def test_app_has_control_buttons_and_status(tmp_path):
@@ -46,7 +47,7 @@ def test_process_current_frame_updates_actions_and_events(tmp_path):
             return type("Status", (), {"running": True, "last_error": "", "frame_size": (640, 480)})()
 
         def read(self):
-            return "frame"
+            return np.zeros((24, 32, 3), dtype="uint8")
 
         def close(self):
             return None
@@ -61,6 +62,8 @@ def test_process_current_frame_updates_actions_and_events(tmp_path):
     assert result["actions"] == {"raise_right_hand"}
     assert app.actions_var.get() == "raise_right_hand"
     assert app.last_events[-1] == ("key", "1", "tap")
+    assert app.preview_status == "Preview updated"
+    assert app.preview_image is not None
     app.root.destroy()
 
 
