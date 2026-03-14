@@ -105,3 +105,22 @@ def test_start_control_processes_first_frame_when_camera_starts(tmp_path):
 
     assert "read" in calls
     app.root.destroy()
+
+
+def test_switch_camera_device_updates_camera_index(tmp_path):
+    app = create_app(AppConfig(base_dir=tmp_path))
+
+    app.set_camera_device(2)
+
+    assert app.camera.device_index == 2
+    app.root.destroy()
+
+
+def test_event_log_and_fps_status_update(tmp_path):
+    app = create_app(AppConfig(base_dir=tmp_path))
+    app._record_output_event("key", "1", "tap")
+    app.update_fps(27.5)
+
+    assert "key:1:tap" in app.event_log_var.get()
+    assert "27.5" in app.fps_var.get()
+    app.root.destroy()

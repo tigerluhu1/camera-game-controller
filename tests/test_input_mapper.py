@@ -75,3 +75,28 @@ def test_direct_input_sender_routes_events_to_backend():
         ("moveRel", 10, -5, True),
         ("click", "left"),
     ]
+
+
+def test_mapper_applies_sensitivity_deadzone_and_smoothing():
+    events = []
+
+    def sender(event_type, value, mode):
+        events.append((event_type, value, mode))
+
+    preset = Preset(
+        game_name="wow",
+        preset_name="pve",
+        bindings={
+            "mouse_move": Binding(
+                action_name="mouse_move",
+                input_type="mouse",
+                input_value="move",
+            ),
+        },
+    )
+
+    mapper = InputMapper(sender=sender, mouse_sensitivity=2.0, mouse_deadzone=5, mouse_smoothing=0.5)
+    mapper.apply_mouse_delta((4, 4), preset)
+    mapper.apply_mouse_delta((10, 0), preset)
+
+    assert events == [("mouse", (10, 0), "move")]

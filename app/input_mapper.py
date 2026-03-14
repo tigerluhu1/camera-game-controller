@@ -39,8 +39,18 @@ class DirectInputSender:
 
 
 class InputMapper:
-    def __init__(self, sender: Sender):
+    def __init__(
+        self,
+        sender: Sender,
+        mouse_sensitivity: float = 1.0,
+        mouse_deadzone: int = 0,
+        mouse_smoothing: float = 0.0,
+    ):
         self.sender = sender
+        self.mouse_sensitivity = mouse_sensitivity
+        self.mouse_deadzone = mouse_deadzone
+        self.mouse_smoothing = mouse_smoothing
+        self._last_mouse_delta = (0.0, 0.0)
 
     def apply_actions(self, actions: set[str], preset: Preset) -> None:
         for action_name in sorted(actions):
@@ -59,4 +69,16 @@ class InputMapper:
         binding = preset.bindings.get("mouse_move")
         if binding is None or not binding.enabled or binding.input_type != "mouse":
             return
-        self.sender("mouse", delta, "move")
+        if abs(delta[0]) < self.mouse_deadzone and abs(delta[1]) < self.mouse_deadzone:
+            return
+        scaled = (
+            delta[0] * self.mouse_sensitivity,
+            delta[1] * self.mouse_sensitivity,
+        )
+        smoothed = (
+            self._last_mouse_delta[0] * self.mouse_smoothing + scaled[0] * (1 - self.mouse_smoothing),
+            self._last_mouse_delta[1] * self.mouse_smoothing + scaled[1] * (1 - self.mouse_smoothing),
+        )
+        self._last_mouse_delta = smoothed
+        rounded = (int(round(smoothed[0])), int(round(smoothed[1])))
+        self.sender("mouse", rounded, "move")

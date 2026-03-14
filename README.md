@@ -21,6 +21,8 @@ The first real vision run downloads MediaPipe task models into `models/` automat
 - Process frames through a controller pipeline and route mapped key or mouse events
 - Initialize real MediaPipe pose and hand landmark backends on demand
 - Render live preview frames with action labels and landmark overlays
+- Tune mouse sensitivity, deadzone, smoothing, and camera device from the UI
+- Show FPS and recent output events in the runtime panel
 
 ## Supported Actions
 
@@ -50,6 +52,7 @@ Use the top toolbar to enter `Game`, `Character`, and `Preset`, then:
 - `Start Control` opens the camera backend and enables mapped input
 - `Stop Control` stops the controller loop and closes the camera backend
 - The preview panel shows the latest rendered camera frame with overlays
+- The runtime panel shows camera device, mouse tuning, FPS, and recent output events
 
 ## Test
 
@@ -66,9 +69,10 @@ pytest -v
 5. Wait for the first run to download MediaPipe models into `models/` if needed
 6. Confirm the camera status changes from idle to running, or shows a clear backend error
 7. Confirm the preview panel updates with the latest frame and action label
-8. Confirm the app updates detected actions when frames are processed
-9. Confirm no input is sent before `Start Control`
-10. Confirm `Stop Control` halts control and closes the camera backend
+8. Adjust mouse sensitivity, deadzone, or smoothing and confirm settings apply while running
+9. Confirm the app updates detected actions when frames are processed
+10. Confirm no input is sent before `Start Control`
+11. Confirm `Stop Control` halts control and closes the camera backend
 
 ## Preset Layout
 
@@ -84,6 +88,6 @@ profiles/
 
 ## Next Steps
 
-- Add mouse sensitivity, deadzone, and smoothing controls
-- Route real keyboard and mouse events through `pydirectinput`
-- Add richer preview widgets for event log, FPS, and camera selection
+- Add explicit mouse delta generation from body-center offsets
+- Add persistent runtime settings per profile
+- Add richer preview widgets for confidence scores and camera selection labels

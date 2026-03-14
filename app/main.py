@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 import tkinter as tk
 from tkinter import ttk
 from tkinter import messagebox, simpledialog
@@ -57,6 +58,7 @@ class ProfileEditorApp:
         self.preview_status = "No preview"
         self.preview_image = None
         self.preview_photo = None
+        self._last_tick_time: float | None = None
         self.direct_input_sender = DirectInputSender()
         self.vision_backend = MediaPipeVisionBackend()
         self.input_mapper = InputMapper(sender=self._dispatch_output_event)
@@ -80,6 +82,11 @@ class ProfileEditorApp:
             self.camera_status_var = SimpleVar("Camera idle")
             self.actions_var = SimpleVar("")
             self.event_log_var = SimpleVar("")
+            self.fps_var = SimpleVar("FPS: --")
+            self.mouse_sensitivity_var = SimpleVar(1.0)
+            self.mouse_deadzone_var = SimpleVar(0)
+            self.mouse_smoothing_var = SimpleVar(0.0)
+            self.camera_device_var = SimpleVar(0)
             self.row_vars = {}
             for action_name in SUPPORTED_ACTIONS:
                 self.row_vars[action_name] = {
@@ -122,6 +129,8 @@ class ProfileEditorApp:
         ttk.Label(self.root, textvariable=self.actions_var, padding=(12, 0)).pack(fill="x")
         self.event_log_var = tk.StringVar(value="")
         ttk.Label(self.root, textvariable=self.event_log_var, padding=(12, 0)).pack(fill="x")
+        self.fps_var = tk.StringVar(value="FPS: --")
+        ttk.Label(self.root, textvariable=self.fps_var, padding=(12, 0)).pack(fill="x")
 
         content = ttk.Frame(self.root, padding=12)
         content.pack(fill="both", expand=True)
@@ -160,6 +169,18 @@ class ProfileEditorApp:
         preview_panel = ttk.Frame(content, padding=(12, 0))
         preview_panel.pack(side="right", fill="y")
         ttk.Label(preview_panel, text="Camera Preview").pack(anchor="w")
+        self.camera_device_var = tk.IntVar(value=self.camera.device_index)
+        self.mouse_sensitivity_var = tk.DoubleVar(value=self.input_mapper.mouse_sensitivity)
+        self.mouse_deadzone_var = tk.IntVar(value=self.input_mapper.mouse_deadzone)
+        self.mouse_smoothing_var = tk.DoubleVar(value=self.input_mapper.mouse_smoothing)
+        ttk.Label(preview_panel, text="Camera Device").pack(anchor="w", pady=(8, 0))
+        ttk.Spinbox(preview_panel, from_=0, to=5, textvariable=self.camera_device_var, width=8).pack(anchor="w")
+        ttk.Label(preview_panel, text="Mouse Sensitivity").pack(anchor="w", pady=(8, 0))
+        ttk.Scale(preview_panel, from_=0.1, to=5.0, variable=self.mouse_sensitivity_var, orient="horizontal").pack(anchor="w", fill="x")
+        ttk.Label(preview_panel, text="Mouse Deadzone").pack(anchor="w", pady=(8, 0))
+        ttk.Spinbox(preview_panel, from_=0, to=100, textvariable=self.mouse_deadzone_var, width=8).pack(anchor="w")
+        ttk.Label(preview_panel, text="Mouse Smoothing").pack(anchor="w", pady=(8, 0))
+        ttk.Scale(preview_panel, from_=0.0, to=0.95, variable=self.mouse_smoothing_var, orient="horizontal").pack(anchor="w", fill="x")
         self.preview_label = ttk.Label(preview_panel, text="No preview", width=40)
         self.preview_label.pack(anchor="w", pady=(8, 0))
 
@@ -203,6 +224,20 @@ class ProfileEditorApp:
         self._record_output_event(event_type, value, mode)
         self.direct_input_sender(event_type, value, mode)
 
+    def update_fps(self, fps: float) -> None:
+        self.fps_var.set(f"FPS: {fps:.1f}")
+
+    def set_camera_device(self, device_index: int) -> None:
+        self.camera.device_index = int(device_index)
+        if hasattr(self, "camera_device_var"):
+            self.camera_device_var.set(int(device_index))
+
+    def apply_runtime_settings(self) -> None:
+        self.input_mapper.mouse_sensitivity = float(self.mouse_sensitivity_var.get())
+        self.input_mapper.mouse_deadzone = int(self.mouse_deadzone_var.get())
+        self.input_mapper.mouse_smoothing = float(self.mouse_smoothing_var.get())
+        self.set_camera_device(int(self.camera_device_var.get()))
+
     def _current_preset(self):
         preset_name = self.preset_var.get().strip()
         game_name = self.game_var.get().strip()
@@ -226,6 +261,7 @@ class ProfileEditorApp:
         self.actions_var.set(", ".join(sorted(actions)))
 
     def process_current_frame(self):
+        self.apply_runtime_settings()
         frame = self.camera.read()
         if frame is None:
             self.camera_status_var.set("No camera frame")
@@ -247,6 +283,12 @@ class ProfileEditorApp:
             except TclError:
                 self.preview_photo = None
                 self.preview_label.configure(text="Preview updated")
+        now = time.perf_counter()
+        if self._last_tick_time is not None:
+            elapsed = now - self._last_tick_time
+            if elapsed > 0:
+                self.update_fps(1.0 / elapsed)
+        self._last_tick_time = now
         return result
 
     def control_tick(self) -> None:
