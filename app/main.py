@@ -3,11 +3,41 @@ from __future__ import annotations
 import tkinter as tk
 from tkinter import ttk
 from tkinter import messagebox, simpledialog
+from tkinter import TclError
 
 from app.config import AppConfig
+from app.controller import Controller
+from app.detection import detect_actions
 from app.editor_state import EditorState
+from app.input_mapper import InputMapper
 from app.profile_store import ProfileStore
 from app.ui import SUPPORTED_ACTIONS
+from app.vision_backend import normalize_result
+
+
+class SimpleVar:
+    def __init__(self, value=None):
+        self._value = value
+
+    def get(self):
+        return self._value
+
+    def set(self, value) -> None:
+        self._value = value
+
+
+class HeadlessRoot:
+    def title(self, _value: str) -> None:
+        return None
+
+    def geometry(self, _value: str) -> None:
+        return None
+
+    def destroy(self) -> None:
+        return None
+
+    def mainloop(self) -> None:
+        return None
 
 
 class ProfileEditorApp:
@@ -15,12 +45,38 @@ class ProfileEditorApp:
         self.config = config
         self.store = ProfileStore(config.profiles_dir)
         self.state = EditorState()
-        self.root = tk.Tk()
+        self.last_frame = None
+        self.last_events: list[tuple[str, object, str]] = []
+        self.input_mapper = InputMapper(sender=self._record_output_event)
+        self.controller = Controller(detector=self._detect_frame, mapper=self._apply_actions)
+        self._headless = False
+        try:
+            self.root = tk.Tk()
+        except TclError:
+            self.root = HeadlessRoot()
+            self._headless = True
         self.root.title("Camera Game Controller")
         self.root.geometry("820x520")
         self._build_shell()
 
     def _build_shell(self) -> None:
+        if self._headless:
+            self.game_var = SimpleVar("")
+            self.character_var = SimpleVar("default")
+            self.preset_var = SimpleVar("")
+            self.status_var = SimpleVar("Ready")
+            self.camera_status_var = SimpleVar("Camera idle")
+            self.actions_var = SimpleVar("")
+            self.row_vars = {}
+            for action_name in SUPPORTED_ACTIONS:
+                self.row_vars[action_name] = {
+                    "enabled": SimpleVar(True),
+                    "input_value": SimpleVar(""),
+                    "trigger_mode": SimpleVar("tap"),
+                    "cooldown_ms": SimpleVar("0"),
+                }
+            return
+
         toolbar = ttk.Frame(self.root, padding=12)
         toolbar.pack(fill="x")
 
@@ -42,9 +98,15 @@ class ProfileEditorApp:
         ttk.Button(toolbar, text="Delete", command=self.prompt_delete_preset).pack(side="left", padx=(0, 12))
         ttk.Button(toolbar, text="Load", command=self.load_preset).pack(side="left", padx=(0, 6))
         ttk.Button(toolbar, text="Save", command=self.save_preset).pack(side="left")
+        ttk.Button(toolbar, text="Start Control", command=self.start_control).pack(side="left", padx=(12, 6))
+        ttk.Button(toolbar, text="Stop Control", command=self.stop_control).pack(side="left")
 
         self.status_var = tk.StringVar(value="Ready")
         ttk.Label(self.root, textvariable=self.status_var, padding=(12, 4)).pack(fill="x")
+        self.camera_status_var = tk.StringVar(value="Camera idle")
+        ttk.Label(self.root, textvariable=self.camera_status_var, padding=(12, 0)).pack(fill="x")
+        self.actions_var = tk.StringVar(value="")
+        ttk.Label(self.root, textvariable=self.actions_var, padding=(12, 0)).pack(fill="x")
 
         table = ttk.Frame(self.root, padding=12)
         table.pack(fill="both", expand=True)
@@ -105,6 +167,28 @@ class ProfileEditorApp:
             row["input_value"].set("")
             row["trigger_mode"].set("tap")
             row["cooldown_ms"].set("0")
+
+    def _record_output_event(self, event_type: str, value: object, mode: str) -> None:
+        self.last_events.append((event_type, value, mode))
+        self.last_events = self.last_events[-10:]
+
+    def _current_preset(self):
+        preset_name = self.preset_var.get().strip()
+        game_name = self.game_var.get().strip()
+        if not game_name or not preset_name:
+            return None
+        return self._build_preset_from_rows()
+
+    def _detect_frame(self, frame) -> dict:
+        normalized = normalize_result({}, {})
+        actions = detect_actions(normalized.landmarks, normalized.hand_states)
+        return {"actions": actions}
+
+    def _apply_actions(self, actions: set[str], preset) -> None:
+        if preset is None:
+            return
+        self.input_mapper.apply_actions(actions, preset)
+        self.actions_var.set(", ".join(sorted(actions)))
 
     def _build_preset_from_rows(self, preset_name: str | None = None):
         from app.profile_models import Binding, Preset
@@ -190,22 +274,38 @@ class ProfileEditorApp:
         self.status_var.set(f"Deleted {preset_name}.")
 
     def prompt_new_preset(self) -> None:
+        if self._headless:
+            return
         preset_name = simpledialog.askstring("New Preset", "Preset name:", parent=self.root)
         if preset_name:
             self.new_preset(preset_name)
 
     def prompt_copy_preset(self) -> None:
+        if self._headless:
+            return
         preset_name = simpledialog.askstring("Copy Preset", "New preset name:", parent=self.root)
         if preset_name:
             self.copy_preset(preset_name)
 
     def prompt_rename_preset(self) -> None:
+        if self._headless:
+            return
         preset_name = simpledialog.askstring("Rename Preset", "New preset name:", parent=self.root)
         if preset_name:
             self.rename_preset(preset_name)
 
     def prompt_delete_preset(self) -> None:
+        if self._headless:
+            return
         self.delete_preset()
+
+    def start_control(self) -> None:
+        self.controller.start()
+        self.camera_status_var.set("Control running")
+
+    def stop_control(self) -> None:
+        self.controller.stop()
+        self.camera_status_var.set("Control stopped")
 
     def run(self) -> None:
         self.root.mainloop()
